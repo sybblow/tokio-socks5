@@ -38,10 +38,13 @@
 //! throwing connections at it yourself, and there should be plenty of comments
 //! below to help walk you through the implementation as well!
 
-#[macro_use] extern crate log;
+#[macro_use]
+extern crate log;
 extern crate env_logger;
-#[macro_use] extern crate futures;
-#[macro_use] extern crate tokio_core;
+#[macro_use]
+extern crate futures;
+#[macro_use]
+extern crate tokio_core;
 extern crate futures_cpupool;
 
 use std::env;
@@ -50,7 +53,7 @@ use std::net::{SocketAddr, Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
 use std::str;
 use std::time::Duration;
 
-use futures::{Future};
+use futures::Future;
 use futures::stream::Stream;
 use futures_cpupool::CpuPool;
 use tokio_core::reactor::{Core, Handle, Timeout};
@@ -81,17 +84,17 @@ fn main() {
     println!("Listening for socks5 proxy connections on {}", addr);
     let clients = listener.incoming().map(move |(socket, addr)| {
         (Client {
-            pool: pool.clone(),
-            handle: handle.clone(),
-        }.serve(socket), addr)
+                 pool: pool.clone(),
+                 handle: handle.clone(),
+             }
+             .serve(socket),
+         addr)
     });
     let handle = lp.handle();
     let server = clients.for_each(|(client, addr)| {
         handle.spawn(client.then(move |res| {
             match res {
-                Ok((a, b)) => {
-                    println!("proxied {}/{} bytes for {}", a, b, addr)
-                }
+                Ok((a, b)) => println!("proxied {}/{} bytes for {}", a, b, addr),
                 Err(e) => println!("error for {}: {}", addr, e),
             }
             futures::finished(())
@@ -130,8 +133,7 @@ impl Client {
     ///
     /// Once we've got the version byte, we then delegate to the below
     /// `serve_vX` methods depending on which version we found.
-    fn serve(self, conn: TcpStream)
-             -> Box<Future<Item = (u64, u64), Error = io::Error>> {
+    fn serve(self, conn: TcpStream) -> Box<Future<Item = (u64, u64), Error = io::Error>> {
         Box::new(read_exact(conn, [0u8]).and_then(|(conn, buf)| {
             match buf[0] {
                 v5::VERSION => self.serve_v5(conn),
@@ -147,8 +149,7 @@ impl Client {
     }
 
     /// Current SOCKSv4 is not implemented, but v5 below has more fun details!
-    fn serve_v4(self, _conn: TcpStream)
-                -> Box<Future<Item = (u64, u64), Error = io::Error>> {
+    fn serve_v4(self, _conn: TcpStream) -> Box<Future<Item = (u64, u64), Error = io::Error>> {
         futures::failed(other("unimplemented")).boxed()
     }
 
@@ -163,8 +164,7 @@ impl Client {
     /// necessary, but without them the compiler is pessimistically slow!
     /// Essentially, the `.boxed()` annotations here improve compile times, but
     /// are otherwise not necessary.
-    fn serve_v5(self, conn: TcpStream)
-                -> Box<Future<Item = (u64, u64), Error = io::Error>> {
+    fn serve_v5(self, conn: TcpStream) -> Box<Future<Item = (u64, u64), Error = io::Error>> {
         // First part of the SOCKSv5 protocol is to negotiate a number of
         // "methods". These methods can typically be used for various kinds of
         // proxy authentication and such, but for this server we only implement
@@ -179,23 +179,23 @@ impl Client {
         // another, but it also serves to simply have fallible computations,
         // such as checking whether the list of methods contains `METH_NO_AUTH`.
         let num_methods = read_exact(conn, [0u8]);
-        let authenticated = num_methods.and_then(|(conn, buf)| {
-            read_exact(conn, vec![0u8; buf[0] as usize])
-        }).and_then(|(conn, buf)| {
-            if buf.contains(&v5::METH_NO_AUTH) {
-                Ok(conn)
-            } else {
-                Err(other("no supported method given"))
-            }
-        }).boxed();
+        let authenticated =
+            num_methods.and_then(|(conn, buf)| read_exact(conn, vec![0u8; buf[0] as usize]))
+                .and_then(|(conn, buf)| {
+                    if buf.contains(&v5::METH_NO_AUTH) {
+                        Ok(conn)
+                    } else {
+                        Err(other("no supported method given"))
+                    }
+                })
+                .boxed();
 
         // After we've concluded that one of the client's supported methods is
         // `METH_NO_AUTH`, we "ack" this to the client by sending back that
         // information. Here we make use of the `write_all` combinator which
         // works very similarly to the `read_exact` combinator.
-        let part1 = authenticated.and_then(|conn| {
-            write_all(conn, [v5::VERSION, v5::METH_NO_AUTH])
-        }).boxed();
+        let part1 = authenticated.and_then(|conn| write_all(conn, [v5::VERSION, v5::METH_NO_AUTH]))
+            .boxed();
 
         // Next up, we get a selected protocol version back from the client, as
         // well as a command indicating what they'd like to do. We just verify
@@ -205,23 +205,25 @@ impl Client {
         // As above, we're using `and_then` not only for chaining "blocking
         // computations", but also to perform fallible computations.
         let ack = part1.and_then(|(conn, _)| {
-            read_exact(conn, [0u8]).and_then(|(conn, buf)| {
-                if buf[0] == v5::VERSION {
-                    Ok(conn)
-                } else {
-                    Err(other("didn't confirm with v5 version"))
-                }
+                read_exact(conn, [0u8]).and_then(|(conn, buf)| {
+                    if buf[0] == v5::VERSION {
+                        Ok(conn)
+                    } else {
+                        Err(other("didn't confirm with v5 version"))
+                    }
+                })
             })
-        }).boxed();
+            .boxed();
         let command = ack.and_then(|conn| {
-            read_exact(conn, [0u8]).and_then(|(conn, buf)| {
-                if buf[0] == v5::CMD_CONNECT {
-                    Ok(conn)
-                } else {
-                    Err(other("unsupported command"))
-                }
+                read_exact(conn, [0u8]).and_then(|(conn, buf)| {
+                    if buf[0] == v5::CMD_CONNECT {
+                        Ok(conn)
+                    } else {
+                        Err(other("unsupported command"))
+                    }
+                })
             })
-        }).boxed();
+            .boxed();
 
         // After we've negotiated a command, there's one byte which is reserved
         // for future use, so we read it and discard it. The next part of the
@@ -235,67 +237,71 @@ impl Client {
         let atyp = resv.and_then(|c| read_exact(c, [0u8]));
         let pool = self.pool.clone();
         let addr = atyp.and_then(|(c, buf)| {
-            match buf[0] {
-                // For IPv4 addresses, we read the 4 bytes for the address as
-                // well as 2 bytes for the port.
-                v5::ATYP_IPV4 => {
-                    read_exact(c, [0u8; 6]).map(|(c, buf)| {
-                        let addr = Ipv4Addr::new(buf[0], buf[1], buf[2], buf[3]);
-                        let port = ((buf[4] as u16) << 8) | (buf[5] as u16);
-                        let addr = SocketAddrV4::new(addr, port);
-                        (c, SocketAddr::V4(addr))
-                    }).boxed()
-                }
+                match buf[0] {
+                    // For IPv4 addresses, we read the 4 bytes for the address as
+                    // well as 2 bytes for the port.
+                    v5::ATYP_IPV4 => {
+                        read_exact(c, [0u8; 6])
+                            .map(|(c, buf)| {
+                                let addr = Ipv4Addr::new(buf[0], buf[1], buf[2], buf[3]);
+                                let port = ((buf[4] as u16) << 8) | (buf[5] as u16);
+                                let addr = SocketAddrV4::new(addr, port);
+                                (c, SocketAddr::V4(addr))
+                            })
+                            .boxed()
+                    }
 
-                // For IPv6 addresses there's 16 bytes of an address plus two
-                // bytes for a port, so we read that off and then keep going.
-                v5::ATYP_IPV6 => {
-                    read_exact(c, [0u8; 18]).map(|(conn, buf)| {
-                        let a = ((buf[0] as u16) << 8) | (buf[1] as u16);
-                        let b = ((buf[2] as u16) << 8) | (buf[3] as u16);
-                        let c = ((buf[4] as u16) << 8) | (buf[5] as u16);
-                        let d = ((buf[6] as u16) << 8) | (buf[7] as u16);
-                        let e = ((buf[8] as u16) << 8) | (buf[9] as u16);
-                        let f = ((buf[10] as u16) << 8) | (buf[11] as u16);
-                        let g = ((buf[12] as u16) << 8) | (buf[13] as u16);
-                        let h = ((buf[14] as u16) << 8) | (buf[15] as u16);
-                        let addr = Ipv6Addr::new(a, b, c, d, e, f, g, h);
-                        let port = ((buf[16] as u16) << 8) | (buf[17] as u16);
-                        let addr = SocketAddrV6::new(addr, port, 0, 0);
-                        (conn, SocketAddr::V6(addr))
-                    }).boxed()
-                }
+                    // For IPv6 addresses there's 16 bytes of an address plus two
+                    // bytes for a port, so we read that off and then keep going.
+                    v5::ATYP_IPV6 => {
+                        read_exact(c, [0u8; 18])
+                            .map(|(conn, buf)| {
+                                let a = ((buf[0] as u16) << 8) | (buf[1] as u16);
+                                let b = ((buf[2] as u16) << 8) | (buf[3] as u16);
+                                let c = ((buf[4] as u16) << 8) | (buf[5] as u16);
+                                let d = ((buf[6] as u16) << 8) | (buf[7] as u16);
+                                let e = ((buf[8] as u16) << 8) | (buf[9] as u16);
+                                let f = ((buf[10] as u16) << 8) | (buf[11] as u16);
+                                let g = ((buf[12] as u16) << 8) | (buf[13] as u16);
+                                let h = ((buf[14] as u16) << 8) | (buf[15] as u16);
+                                let addr = Ipv6Addr::new(a, b, c, d, e, f, g, h);
+                                let port = ((buf[16] as u16) << 8) | (buf[17] as u16);
+                                let addr = SocketAddrV6::new(addr, port, 0, 0);
+                                (conn, SocketAddr::V6(addr))
+                            })
+                            .boxed()
+                    }
 
-                // The SOCKSv5 protocol not only supports proxying to specific
-                // IP addresses, but also arbitrary hostnames. This allows
-                // clients to perform hostname lookups within the context of the
-                // proxy server rather than the client itself.
-                //
-                // As of the time of this writing there's not a DNS library
-                // based on futures, but we can take this opportunity to show
-                // how to execute otherwise-blocking computations! The basic
-                // idea is that we'll farm out the DNS resolution work to the
-                // standard library, which performs blocking I/O, onto dedicated
-                // threads for performing these blocking syscalls.
-                //
-                // This'll incur some overhead as we're communicating with
-                // another thread, so this would of course be better to
-                // implement with just pure futures, but that may not always be
-                // possible!
-                //
-                // In any case, though, the protocol here is to have the next
-                // byte indicate how many bytes the hostname contains, followed
-                // by the hostname and two bytes for the port. To read this
-                // data, we execute two respective `read_exact` operations to
-                // fill up a buffer for the hostname.
-                //
-                // Finally, to perform the "interesting" part, we use our handle
-                // to the thread pool (the `pool` variable), to execute an
-                // arbitrary computation on a separate thread. This for now is
-                // just the `resolve` function returning an
-                // `io::Result<SocketAddr>`, and then we transform the future
-                // type back to match what's above as well.
-                v5::ATYP_DOMAIN => {
+                    // The SOCKSv5 protocol not only supports proxying to specific
+                    // IP addresses, but also arbitrary hostnames. This allows
+                    // clients to perform hostname lookups within the context of the
+                    // proxy server rather than the client itself.
+                    //
+                    // As of the time of this writing there's not a DNS library
+                    // based on futures, but we can take this opportunity to show
+                    // how to execute otherwise-blocking computations! The basic
+                    // idea is that we'll farm out the DNS resolution work to the
+                    // standard library, which performs blocking I/O, onto dedicated
+                    // threads for performing these blocking syscalls.
+                    //
+                    // This'll incur some overhead as we're communicating with
+                    // another thread, so this would of course be better to
+                    // implement with just pure futures, but that may not always be
+                    // possible!
+                    //
+                    // In any case, though, the protocol here is to have the next
+                    // byte indicate how many bytes the hostname contains, followed
+                    // by the hostname and two bytes for the port. To read this
+                    // data, we execute two respective `read_exact` operations to
+                    // fill up a buffer for the hostname.
+                    //
+                    // Finally, to perform the "interesting" part, we use our handle
+                    // to the thread pool (the `pool` variable), to execute an
+                    // arbitrary computation on a separate thread. This for now is
+                    // just the `resolve` function returning an
+                    // `io::Result<SocketAddr>`, and then we transform the future
+                    // type back to match what's above as well.
+                    v5::ATYP_DOMAIN => {
                     read_exact(c, [0u8]).and_then(|(conn, buf)| {
                         read_exact(conn, vec![0u8; buf[0] as usize + 2])
                     }).and_then(move |(conn, buf)| {
@@ -303,12 +309,13 @@ impl Client {
                             .map(|addr| (conn, addr))
                     }).boxed()
                 }
-                n => {
-                    let msg = format!("unknown ATYP received: {}", n);
-                    futures::failed(other(&msg)).boxed()
+                    n => {
+                        let msg = format!("unknown ATYP received: {}", n);
+                        futures::failed(other(&msg)).boxed()
+                    }
                 }
-            }
-        }).boxed();
+            })
+            .boxed();
 
         // Now that we've got a socket address to connect to, let's actually
         // create a connection to that socket!
@@ -363,8 +370,7 @@ impl Client {
             // standard.
             let addr = match c2.as_ref().map(|r| r.local_addr()) {
                 Ok(Ok(addr)) => addr,
-                Ok(Err(..)) |
-                Err(..) => addr,
+                Ok(Err(..)) | Err(..) => addr,
             };
             let pos = match addr {
                 SocketAddr::V4(ref a) => {
@@ -395,9 +401,7 @@ impl Client {
             // the connection.
             let mut w = Window::new(resp);
             w.set_end(pos + 2);
-            write_all(c1, w).and_then(|(c1, _)| {
-                c2.map(|c2| (c1, c2))
-            })
+            write_all(c1, w).and_then(|(c1, _)| c2.map(|c2| (c1, c2)))
         }));
 
         // Phew! If you've gotten this far, then we're now entirely done with
@@ -488,18 +492,15 @@ fn resolve(addr_buf: &[u8]) -> io::Result<SocketAddr> {
     // The last two bytes of the buffer are the port, and the other parts of it
     // are the hostname.
     let hostname = &addr_buf[..addr_buf.len() - 2];
-    let hostname = try!(str::from_utf8(hostname).map_err(|_e| {
-        other("hostname buffer provided was not valid utf-8")
-    }));
+    let hostname = try!(str::from_utf8(hostname)
+        .map_err(|_e| other("hostname buffer provided was not valid utf-8")));
     let pos = addr_buf.len() - 2;
     let port = ((addr_buf[pos] as u16) << 8) | (addr_buf[pos + 1] as u16);
 
     let hostname = format!("{}:{}", hostname, port);
 
     let mut addrs = try!(hostname.to_socket_addrs());
-    addrs.next().ok_or_else(|| {
-        other("no addresses found during name resolution")
-    })
+    addrs.next().ok_or_else(|| other("no addresses found during name resolution"))
 }
 
 
